@@ -21,8 +21,22 @@ Results dashboard: <https://sdn2.rmri.ro/zenodo_inventory_new/>
 
 ## 1. Methodology
 
-The input is the inventory JSON of Task 1 (Included + Manual review records). Every record goes
-through two levels:
+### Two stages: pre-screening and final QC
+
+The official EMODnet Biology QC (LifeWatch QC tool, EMODnetBiocheck) is defined on **Darwin
+Core** data: it checks `occurrenceID`, `scientificNameID`, `basisOfRecord`, ISO `eventDate`,
+Event–Occurrence–eMoF links. Raw Zenodo files almost never carry these terms, so QC runs twice:
+
+| Stage | Input | Purpose | Output |
+|---|---|---|---|
+| **1. Pre-screening** | raw files published on Zenodo | Which datasets *can* be converted (date, coordinates, taxon present?) and what is missing | `qc_results.*`, `QC_Report_Zenodo.xlsx` |
+| **2. Final QC** | Darwin Core Archives produced by Task 3 | Authoritative Pass / Warnings / Fail against the EMODnet criteria + EMODnetBiocheck | `qc_dwca_results.*`, `QC_Report_DwC.xlsx` |
+
+Workflow: Task 1 inventory → **stage 1** → Task 3 conversion of the convertible datasets →
+**stage 2** → publication (IPT / EMODnet Biology).
+
+The input of stage 1 is the inventory JSON of Task 1 (Included + Manual review records). Every
+record goes through two levels:
 
 ### Level A — metadata QC (all records)
 Uses the inventory fields and the Zenodo record API (`https://zenodo.org/api/records/<id>`).
@@ -128,12 +142,35 @@ python zenodo_qc.py --inventory data.json --limit 50
 | `--force` | off | recompute records already processed (per-record results are kept in `output/_records/` so an interrupted run resumes) |
 | `--workers` | 6 | records processed in parallel (API calls are rate-limited globally) |
 
+### Stage 2 — final QC on the Darwin Core Archives (after Task 3)
+
+```bash
+# Python checks D01–D15 on every DwC-A listed in Task 3's conversion_results.json
+python zenodo_qc.py --dwca ../zenodo_dwc_converter/output/conversion_results.json --out output
+
+# ... plus EMODnetBiocheck / obistools on each archive (needs R)
+python zenodo_qc.py --dwca ../zenodo_dwc_converter/output/conversion_results.json --run-biocheck
+```
+
+Metadata checks (M01–M08) are reused from the stage 1 results in the same `--out` folder.
+Status rules in stage 2: any failed *error* criterion or any EMODnetBiocheck structural error
+(`general_issues`: unlinked / missing IDs, invalid fields) → **Fail**; warnings or
+EMODnetBiocheck vocabulary issues (eMoF unit/type IDs, marine taxa on land) → **Warnings**;
+otherwise **Pass – ready for EMODnet Biology / IPT publication**.
+
+Tested on the published EurOBIS archive *Romanian Black Sea Phytoplankton 2006–2015*: data score
+98, 0 Biocheck errors, 5 Biocheck warnings (`measurementUnitID does not resolve`) and 65 % of the
+taxa flagged marine/brackish in WoRMS → *Warnings*.
+
 ### Outputs (`output/`)
 * **`qc_results.json`** — consumed by the dashboard:
   `{generated, tool, summary{total, data_checked, pass, warnings, fail, not_checked, avg_metadata_score, avg_data_score}, criteria[], datasets[{record_id, title, doi, url, taxa, regions, inventory_status, access, license, metadata_score, data_checked, files_checked[], n_records, n_taxa, worms_matched_pct, onland_pct, data_score, qc_status, checks[{id, result, details}], issues[], recommendation}]}`
 * **`qc_results.csv`** — one row per dataset, one column per check.
 * **`QC_Report_Zenodo.xlsx`** — sheets `Summary`, `Datasets`, `Checks` (long format, one row
   per dataset × check with details), `Criteria`.
+* Stage 2: **`qc_dwca_results.json`** (same schema plus `stage`, `conversion_status`,
+  `raw_qc_status`, `dwca_file`, `biocheck{errors, warnings, messages…}`), `qc_dwca_results.csv`,
+  `QC_Report_DwC.xlsx`; Biocheck reports per record in `output/biocheck/<record_id>/`.
 
 ## 4. Optional R route — EMODnetBiocheck / obistools
 
@@ -141,7 +178,7 @@ Once a dataset is in Darwin Core (from Task 3, or already published on an IPT), 
 EMODnet Biology checks can be run with [`R/run_biocheck.R`](R/run_biocheck.R):
 
 ```bash
-Rscript R/run_biocheck.R --dwca output_dwca/12345_dwca.zip --out output/biocheck_12345
+Rscript R/run_biocheck.R --dwca output_dwca/12345_dwca.zip --out output/biocheck/12345
 Rscript R/run_biocheck.R --dir  path/to/unzipped_dwca
 Rscript R/run_biocheck.R --ipt  "https://ipt.vliz.be/eurobis/resource?r=ro_black_sea_fpk_2006_2015"
 ```
@@ -149,9 +186,11 @@ Rscript R/run_biocheck.R --ipt  "https://ipt.vliz.be/eurobis/resource?r=ro_black
 The script installs `EMODnetBiocheck` from GitHub (`remotes::install_github("EMODnet/EMODnetBiocheck")`)
 and runs `checkdataset()`; if the installation fails it still runs the `obistools` checks
 (`check_fields`, `check_onland`, `check_depth`, `check_eventdate`, `match_taxa`) and writes
-`obistools_issues.csv` and `summary.txt`.
+`obistools_issues.csv`, `summary.txt` and `summary.json` (read by `zenodo_qc.py --dwca`).
+In a DwC-A star schema the extensions link to the core through `id`; the script copies it into
+`eventID` when missing, otherwise Biocheck reports every eMoF row as unlinked.
 
-## 5. Latest run (12 October 2026)
+## 5. Latest run — stage 1 pre-screening (12 October 2026)
 
 Input: 673 inventory records (436 Included + 237 Manual review), anonymous API access.
 
@@ -165,8 +204,9 @@ Input: 673 inventory records (436 Included + 237 Manual review), anonymous API a
 Data-checked: 421 records (1,543 tables). Average metadata score 84.9, average data score 59.7.
 Main blocker: 370 of the 398 failures miss at least one core field (date, coordinates or
 scientific name) — typical of paper supplements that report aggregated or sample-level results.
-No dataset reaches *Pass* because none carries the full set of Darwin Core identifiers
-(occurrenceID, scientificNameID, occurrenceStatus, basisOfRecord); these are generated by Task 3.
+No dataset reaches *Pass* at this stage because none carries the full set of Darwin Core
+identifiers (occurrenceID, scientificNameID, occurrenceStatus, basisOfRecord); these are
+generated by Task 3, and the authoritative status comes from stage 2.
 
 ## 6. Limitations
 * Column mapping is heuristic: unusual headers (other languages, codes) may be missed — such

@@ -20,6 +20,7 @@ Usage:
     python zenodo_qc.py --inventory data.json --out output
     python zenodo_qc.py --ids 8094440,7654321 --force
     python zenodo_qc.py --skip-data          # metadata QC only
+    python zenodo_qc.py --dwca ../zenodo_dwc_repo/output/conversion_results.json   # stage 2: final QC on DwC-A
 """
 
 import argparse
@@ -28,6 +29,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -42,7 +44,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-TOOL_VERSION = 'zenodo_qc v1.0'
+TOOL_VERSION = 'zenodo_qc v1.1'
 
 ZENODO_API = 'https://zenodo.org/api/records/'
 XYLOOKUP_API = 'https://api.obis.org/xylookup'
@@ -1389,15 +1391,24 @@ def build_summary(results):
                 avg_data_score=round(sum(ds) / len(ds), 1) if ds else 0.0)
 
 
-def write_outputs(results, out_dir):
+OUTPUT_NAMES = {
+    # stage -> (json, csv, xlsx)
+    'raw': ('qc_results.json', 'qc_results.csv', 'QC_Report_Zenodo.xlsx'),
+    'dwca': ('qc_dwca_results.json', 'qc_dwca_results.csv', 'QC_Report_DwC.xlsx'),
+}
+
+
+def write_outputs(results, out_dir, stage='raw', extra_cols=()):
     os.makedirs(out_dir, exist_ok=True)
+    json_name, csv_name, xlsx_name = OUTPUT_NAMES[stage]
     summary = build_summary(results)
     doc = dict(generated=datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds'),
                tool=TOOL_VERSION,
+               stage=stage,
                summary=summary,
                criteria=[CRIT[c[0]] for c in CRITERIA],
                datasets=results)
-    with open(os.path.join(out_dir, 'qc_results.json'), 'w', encoding='utf-8') as f:
+    with open(os.path.join(out_dir, json_name), 'w', encoding='utf-8') as f:
         json.dump(doc, f, ensure_ascii=False, indent=1, default=str)
 
     rows = []
@@ -1405,7 +1416,7 @@ def write_outputs(results, out_dir):
         row = {k: r[k] for k in ('record_id', 'title', 'doi', 'url', 'taxa', 'regions', 'inventory_status',
                                  'access', 'license', 'qc_status', 'metadata_score', 'data_score',
                                  'data_checked', 'n_records', 'n_taxa', 'worms_matched_pct', 'onland_pct',
-                                 'recommendation')}
+                                 'recommendation') + tuple(extra_cols)}
         row['issues'] = '; '.join(r['issues'])
         row['files_checked'] = '; '.join(f['name'] for f in r['files_checked'])
         for c in r['checks']:
@@ -1416,7 +1427,7 @@ def write_outputs(results, out_dir):
         if c[0] not in cols_order:
             cols_order.append(c[0])
     datasets = pd.DataFrame(rows).reindex(columns=cols_order)
-    datasets.to_csv(os.path.join(out_dir, 'qc_results.csv'), index=False, encoding='utf-8-sig')
+    datasets.to_csv(os.path.join(out_dir, csv_name), index=False, encoding='utf-8-sig')
 
     long = pd.DataFrame([dict(record_id=r['record_id'], title=r['title'], check_id=c['id'],
                               check=CRIT[c['id']]['name'], level=CRIT[c['id']]['level'],
@@ -1424,12 +1435,120 @@ def write_outputs(results, out_dir):
                          for r in results for c in r['checks']])
     summ = pd.DataFrame([dict(metric=k, value=v) for k, v in summary.items()] +
                         [dict(metric='generated', value=doc['generated']), dict(metric='tool', value=TOOL_VERSION)])
-    with pd.ExcelWriter(os.path.join(out_dir, 'QC_Report_Zenodo.xlsx'), engine='openpyxl') as w:
+    with pd.ExcelWriter(os.path.join(out_dir, xlsx_name), engine='openpyxl') as w:
         summ.to_excel(w, sheet_name='Summary', index=False)
         datasets.to_excel(w, sheet_name='Datasets', index=False)
         long.to_excel(w, sheet_name='Checks', index=False)
         pd.DataFrame([CRIT[c[0]] for c in CRITERIA]).to_excel(w, sheet_name='Criteria', index=False)
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 - final QC on the Darwin Core Archives produced by Task 3
+# ---------------------------------------------------------------------------
+# EMODnet Biology QC (LifeWatch QC tool, EMODnetBiocheck) is defined on Darwin Core
+# data. The raw-file run above is therefore a pre-screening (which datasets can be
+# converted); the authoritative Pass / Warnings / Fail comes from this stage.
+
+def decide_dwca(dchecks, issues, biocheck):
+    errors = [c for c in dchecks if c['result'] == 'fail' and CRIT[c['id']]['severity'] == 'error']
+    warns = [c for c in dchecks if c['result'] in ('warn', 'fail')]
+    bio_err = (biocheck or {}).get('errors') or 0
+    if errors or bio_err:
+        bad = [CRIT[c['id']]['name'] for c in errors]
+        if bio_err:
+            bad.append(f'{bio_err} EMODnetBiocheck error(s)')
+        return 'Fail', 'Fix before publication: ' + ', '.join(bad)
+    bio_warn = (biocheck or {}).get('warnings') or 0
+    if warns or bio_warn:
+        fixes = [CRIT[c['id']]['name'] for c in warns]
+        if bio_warn:
+            fixes.append(f'{bio_warn} EMODnetBiocheck warning(s)')
+        return 'Warnings', 'Publishable after review: ' + ', '.join(fixes[:4])
+    return 'Pass', 'Ready for EMODnet Biology / IPT publication'
+
+
+def load_biocheck(biocheck_dir, rec_id):
+    """Summary written by R/run_biocheck.R (--out <biocheck_dir>/<rec_id>), if it was run."""
+    path = os.path.join(biocheck_dir, str(rec_id), 'summary.json')
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def run_biocheck_r(dwca_path, out_dir, log):
+    """Run R/run_biocheck.R (EMODnetBiocheck + obistools) on one archive."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'R', 'run_biocheck.R')
+    try:
+        subprocess.run(['Rscript', script, '--dwca', os.path.abspath(dwca_path), '--out', out_dir],
+                       check=False, capture_output=True, timeout=1800)
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        log(f'   Rscript failed for {dwca_path}: {ex}')
+
+
+def run_dwca_stage(args, log):
+    os.makedirs(args.out, exist_ok=True)
+    with open(args.dwca, encoding='utf-8') as f:
+        conv = json.load(f)
+    base = os.path.dirname(os.path.abspath(args.dwca))
+    raw = {}
+    raw_path = os.path.join(args.out, OUTPUT_NAMES['raw'][0])
+    if os.path.exists(raw_path):
+        with open(raw_path, encoding='utf-8') as f:
+            raw = {d['record_id']: d for d in json.load(f).get('datasets', [])}
+    worms = WormsCache(os.path.join(args.out, 'worms_cache.json'))
+    biocheck_dir = args.biocheck or os.path.join(args.out, 'biocheck')
+
+    results = []
+    todo = [d for d in conv.get('datasets', []) if d.get('dwca_file')]
+    if args.ids:
+        wanted = set(args.ids.split(','))
+        todo = [d for d in todo if str(d.get('record_id')) in wanted]
+    for n, d in enumerate(todo, 1):
+        rid = str(d['record_id'])
+        path = os.path.join(base, d['dwca_file'])
+        prev = raw.get(rid, {})
+        mchecks = [c for c in prev.get('checks', []) if c['id'].startswith('M')]
+        out = dict(record_id=rid, title=d.get('title'), doi=d.get('doi'), url=d.get('url'),
+                   taxa=d.get('taxa'), regions=d.get('regions'),
+                   inventory_status=prev.get('inventory_status'), access=prev.get('access'),
+                   license=prev.get('license'), metadata_score=prev.get('metadata_score'),
+                   data_checked=False, files_checked=[], n_records=None, n_taxa=None,
+                   worms_matched_pct=None, onland_pct=None, data_score=None,
+                   qc_status='Not checked', checks=list(mchecks), issues=[], recommendation='',
+                   conversion_status=d.get('status'), dwca_file=d.get('dwca_file'),
+                   raw_qc_status=prev.get('qc_status'), biocheck=None)
+        tables = read_zip(path, os.path.basename(path), log) if os.path.exists(path) else []
+        if not tables:
+            out['recommendation'] = 'Not checked: DwC-A missing or unreadable'
+            results.append(out)
+            continue
+        out['files_checked'] = [dict(name=t['name'], format='dwca', rows=int(t['df'].shape[0]),
+                                     columns=int(t['df'].shape[1]), layout='dwca') for t in tables]
+        regions = [r.strip() for r in str(d.get('regions') or '').split(',') if r.strip()]
+        dchecks, issues, stats = data_checks(tables, regions, worms, d.get('title') or '', out['files_checked'])
+        if args.run_biocheck and (args.force or load_biocheck(biocheck_dir, rid) is None):
+            run_biocheck_r(path, os.path.join(biocheck_dir, rid), log)
+        biocheck = load_biocheck(biocheck_dir, rid)
+        out.update(stats, data_checked=True, data_score=score(dchecks), checks=mchecks + dchecks,
+                   issues=list(dict.fromkeys(issues)), biocheck=biocheck)
+        out['qc_status'], out['recommendation'] = decide_dwca(dchecks, out['issues'], biocheck)
+        log(f'[{n}/{len(todo)}] {rid} {out["qc_status"]:<9} data={out["data_score"]}  {str(out["title"])[:60]}')
+        results.append(out)
+        for t in tables:
+            t.pop('df', None)
+
+    worms.save()
+    summary = write_outputs(results, args.out, stage='dwca',
+                            extra_cols=('conversion_status', 'raw_qc_status', 'dwca_file'))
+    for k, v in summary.items():
+        log(f'  {k:<20}: {v}')
+    log(f'Outputs: {os.path.join(args.out, OUTPUT_NAMES["dwca"][0])}, '
+        f'{OUTPUT_NAMES["dwca"][1]}, {OUTPUT_NAMES["dwca"][2]}')
 
 
 # ---------------------------------------------------------------------------
@@ -1445,7 +1564,17 @@ def main():
     ap.add_argument('--skip-data', action='store_true', help='metadata QC only')
     ap.add_argument('--force', action='store_true', help='ignore per-record results from earlier runs')
     ap.add_argument('--workers', type=int, default=6, help='parallel records')
+    ap.add_argument('--dwca', default='', help='stage 2: conversion_results.json from Task 3 - '
+                                               'final QC on the produced Darwin Core Archives')
+    ap.add_argument('--biocheck', default='', help='folder with R/run_biocheck.R results per record '
+                                                   '(default <out>/biocheck)')
+    ap.add_argument('--run-biocheck', action='store_true', help='with --dwca: run R/run_biocheck.R on each '
+                                                                'archive (needs R + EMODnetBiocheck)')
     args = ap.parse_args()
+
+    if args.dwca:
+        run_dwca_stage(args, print)
+        return
 
     with open(args.inventory, encoding='utf-8') as f:
         inventory = json.load(f)

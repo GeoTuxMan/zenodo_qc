@@ -59,6 +59,19 @@ if (!is.null(dwca)) {
 }
 tables <- if (!is.null(dir)) read_dwc(dir) else list(event = NULL, occurrence = NULL, emof = NULL)
 
+# In a DwC-A star schema the extensions link to the core through the "id" column.
+# EMODnetBiocheck expects an explicit eventID in Occurrence / eMoF, so fill it from
+# the core id when missing (otherwise every eMoF row is reported as unlinked).
+if (!is.null(tables$event)) {
+  for (nm in c("occurrence", "emof")) {
+    t <- tables[[nm]]
+    if (!is.null(t) && "id" %in% names(t) && (!"eventID" %in% names(t) || all(is.na(t$eventID)))) {
+      t$eventID <- t$id
+      tables[[nm]] <- t
+    }
+  }
+}
+
 summary_lines <- c(sprintf("run_biocheck.R - %s", format(Sys.time())))
 
 # --- 1. EMODnetBiocheck ------------------------------------------------------
@@ -128,6 +141,26 @@ if (has_obistools && !is.null(tables$occurrence)) {
                                             paste(names(issues), collapse = ", ")))
 } else {
   summary_lines <- c(summary_lines, "obistools: skipped (package or occurrence table missing)")
+}
+
+# --- machine-readable summary, read by zenodo_qc.py --dwca ----------------------
+n_rows <- function(x) if (is.data.frame(x)) nrow(x) else 0L
+bc <- if (exists("res") && !is.null(res)) res else NULL
+general <- if (!is.null(bc)) bc$dtb$general_issues else NULL
+summary_json <- list(
+  biocheck = !is.null(bc),
+  # general_issues = structural errors (missing / unlinked IDs, invalid fields)
+  errors = n_rows(general),
+  # eMoF vocabulary problems, non-exclusive unit IDs, marine taxa on land
+  warnings = n_rows(bc$dtb$mof_issues) + sum(vapply(bc$exclusivity_fails, n_rows, 0L)) +
+    n_rows(bc$MarTaxaonLand),
+  messages = if (n_rows(general)) unique(paste0(general$table, ": ", general$field, " - ", general$message)) else list(),
+  mof_messages = if (n_rows(bc$dtb$mof_issues)) unique(bc$dtb$mof_issues$message) else list(),
+  marine_taxa_on_land = n_rows(bc$MarTaxaonLand),
+  obistools_issue_rows = if (exists("all_issues")) NROW(all_issues) else NA
+)
+if (need("jsonlite")) {
+  jsonlite::write_json(summary_json, file.path(out, "summary.json"), auto_unbox = TRUE, pretty = TRUE)
 }
 
 writeLines(summary_lines, file.path(out, "summary.txt"))
