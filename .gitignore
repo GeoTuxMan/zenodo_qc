@@ -1,0 +1,20 @@
+# Outputs and caches
+output/
+test_out/
+zenodo_cache/
+*.part
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# R
+.Rhistory
+.RData
+
+# OS
+.DS_Store
+Thumbs.db
