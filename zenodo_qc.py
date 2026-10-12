@@ -54,6 +54,8 @@ warnings.filterwarnings('ignore', category=UserWarning)
 
 MAX_FILE_MB = 30            # files above this size are skipped
 MAX_FILES_PER_RECORD = 8    # tabular files read per record
+MAX_ATTEMPTS_PER_RECORD = 12   # files downloaded per record (readable or not)
+MAX_MB_PER_RECORD = 120     # total MB downloaded per record
 MAX_ROWS = 300_000          # rows read per table
 MAX_WORMS_NAMES = 200       # unique names sent to WoRMS per dataset (sampled above)
 MAX_XY_POINTS = 3000        # unique coordinates sent to xylookup per dataset
@@ -513,6 +515,7 @@ def load_tables(rec_id, record, cache_dir, log):
     cand.sort(key=lambda f: (bool(re.search(HELPER_FILES, f['key'], re.I)),
                              f.get('size', 0)))
     tables, checked, skipped = [], [], []
+    attempts, fetched_mb = 0, 0.0
     for f in cand:
         if len(checked) >= MAX_FILES_PER_RECORD:
             break
@@ -520,6 +523,11 @@ def load_tables(rec_id, record, cache_dir, log):
         if size > MAX_FILE_MB * 1024 * 1024:
             skipped.append(f'{key} ({size / 1048576:.0f} MB > {MAX_FILE_MB} MB)')
             continue
+        attempts += 1
+        fetched_mb += size / 1048576
+        if attempts > MAX_ATTEMPTS_PER_RECORD or fetched_mb > MAX_MB_PER_RECORD:
+            skipped.append(f'{len(cand) - attempts + 1} more file(s) not examined (per-record limit)')
+            break
         url = (f.get('links') or {}).get('self') or f'{ZENODO_API}{rec_id}/files/{key}/content'
         dest = os.path.join(cache_dir, rec_id, safe_name(key))
         if not download(url, dest):
@@ -930,7 +938,7 @@ def pct(a, b):
     return round(100.0 * a / b, 1) if b else None
 
 
-def data_checks(tables, regions, worms, title=''):
+def data_checks(tables, regions, worms, title='', files_checked=None):
     checks = []
     issues = []
     stats = dict(n_records=None, n_taxa=None, worms_matched_pct=None, onland_pct=None)
@@ -950,6 +958,17 @@ def data_checks(tables, regions, worms, title=''):
     prim = tables[0]
     df, m = prim['df'], prim['map']
     wide, taxa_cols = detect_wide(df) if prim['layout'] != 'dwca' else (False, [])
+    if wide:
+        # confirm the matrix really has taxa as columns/rows (not "Temperature", "Salinity"...)
+        probe = taxa_cols if taxa_cols != ['__rows__'] else df[df.columns[0]].dropna().astype(str).tolist()
+        probe = list(dict.fromkeys(filter(None, (clean_name(n) for n in probe))))[:30]
+        hits = sum(1 for v in worms.match(probe).values() if v) if probe else 0
+        if not probe or hits < 0.5 * len(probe):
+            wide, taxa_cols = False, []
+            prim['layout'] = 'long'
+            for f in files_checked or []:
+                if f.get('name') == prim['name']:
+                    f['layout'] = 'long'
     stats['n_records'] = int(df.shape[0])
 
     # coordinates may live in a separate station table
@@ -1336,7 +1355,7 @@ def process(item, args, worms, log):
             else:
                 reason = 'no tabular content found in files' + (f' ({"; ".join(skipped[:2])})' if skipped else '')
         if reason is None:
-            dchecks, issues, stats = data_checks(tables, regions, worms, item.get('Data title', ''))
+            dchecks, issues, stats = data_checks(tables, regions, worms, item.get('Data title', ''), checked)
             out.update(stats)
             out['data_checked'] = True
             out['data_score'] = score(dchecks)
