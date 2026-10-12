@@ -147,12 +147,15 @@ if (has_obistools && !is.null(tables$occurrence)) {
 n_rows <- function(x) if (is.data.frame(x)) nrow(x) else 0L
 bc <- if (exists("res") && !is.null(res)) res else NULL
 general <- if (!is.null(bc)) bc$dtb$general_issues else NULL
+# general_issues have no severity column: absent / empty required terms and broken links are
+# errors, the rest (recommended terms, potential duplicates, sampling descriptors...) warnings
+# (same rule as classify_biocheck() in zenodo_qc.py)
+is_error <- if (n_rows(general)) grepl("Required field .* is missing|Empty value for required field|has no corresponding|not unique|is not linked",
+                                       general$message, ignore.case = TRUE) else logical(0)
 summary_json <- list(
   biocheck = !is.null(bc),
-  # general_issues = structural errors (missing / unlinked IDs, invalid fields)
-  errors = n_rows(general),
-  # eMoF vocabulary problems, non-exclusive unit IDs, marine taxa on land
-  warnings = n_rows(bc$dtb$mof_issues) + sum(vapply(bc$exclusivity_fails, n_rows, 0L)) +
+  errors = sum(is_error),
+  warnings = sum(!is_error) + n_rows(bc$dtb$mof_issues) + sum(vapply(bc$exclusivity_fails, n_rows, 0L)) +
     n_rows(bc$MarTaxaonLand),
   messages = if (n_rows(general)) unique(paste0(general$table, ": ", general$field, " - ", general$message)) else list(),
   mof_messages = if (n_rows(bc$dtb$mof_issues)) unique(bc$dtb$mof_issues$message) else list(),

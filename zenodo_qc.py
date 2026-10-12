@@ -1475,9 +1475,32 @@ def load_biocheck(biocheck_dir, rec_id):
         return None
     try:
         with open(path, encoding='utf-8') as f:
-            return json.load(f)
+            bc = json.load(f)
     except (OSError, ValueError):
         return None
+    return classify_biocheck(bc)
+
+
+# EMODnetBiocheck general_issues carry no severity level: required terms that are absent or
+# empty and broken links between tables are errors, everything else (recommended terms,
+# potential duplicates, missing sampling descriptors, coordinates on land...) is a warning.
+BIOCHECK_ERROR_RE = re.compile(r'Required field .* is missing|Empty value for required field|'
+                               r'has no corresponding|not unique|is not linked', re.I)
+
+
+def classify_biocheck(bc):
+    msgs = bc.get('messages') or []
+    if isinstance(msgs, str):
+        msgs = [msgs]
+    err = [m for m in msgs if BIOCHECK_ERROR_RE.search(m)]
+    warn = [m for m in msgs if m not in err]
+    other = (bc.get('mof_messages') or [])
+    other = [other] if isinstance(other, str) else other
+    bc['error_messages'] = err
+    bc['warning_messages'] = warn + other
+    bc['errors'] = len(err)
+    bc['warnings'] = len(warn) + len(other) + (1 if bc.get('marine_taxa_on_land') else 0)
+    return bc
 
 
 def run_biocheck_r(dwca_path, out_dir, log):
