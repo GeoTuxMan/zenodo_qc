@@ -68,7 +68,7 @@ has none. Species-by-sample matrices ("wide" layout) are detected.
 | D03 | Darwin Core identifiers & terms | warning | occurrenceID, scientificNameID, occurrenceStatus, basisOfRecord | `check_fields` |
 | D04 | Coordinate validity | error | ranges, no (0,0), decimal degrees | `check_fields`, range checks |
 | D05 | Coordinates in declared region | warning | ≥ 90 % inside region bounding box (≥ 30 % warn) | geographic consistency |
-| D06 | Points at sea | error | OBIS xylookup shoredistance < 0 = land; ≤ 5 % pass, ≤ 25 % warn | `check_onland` |
+| D06 | Points at sea | error | OBIS xylookup: land = inside the coastline (shoredistance < 0) **and** > 5 m above sea level; inland points at sea level (lagoons, estuaries, deltas - left on land by the simplified xylookup coastline) are accepted and counted apart; ≤ 5 % pass, ≤ 25 % warn | `check_onland` |
 | D07 | Date validity | error | ≥ 95 % parseable and ISO 8601, none in future | `check_eventdate` |
 | D08 | Depth consistency | warning | numeric, ≥ 0, min ≤ max, ≤ bathymetry × 1.1 + 50 m | `check_depth` |
 | D09 | Taxon names in WoRMS | error | WoRMS `AphiaRecordsByMatchNames`: ≥ 90 % pass, ≥ 60 % warn | `match_taxa` |
@@ -227,22 +227,22 @@ Input: the 167 DwC-A produced by Task 3 (23 *Converted*, 144 *Partial*), Python 
 | QC status | Archives | What blocks publication |
 |---|---|---|
 | Pass | 0 | — |
-| Warnings | 11 | recommended terms only (depth, sampling instrument / effort), potential duplicates |
-| Fail | 156 | see below |
+| Warnings | 12 | recommended terms only (depth, sampling instrument / effort), potential duplicates |
+| Fail | 155 | see below |
 
 | Main error | Archives | Fix |
 |---|---|---|
 | a required term absent from the whole dataset (eventDate, coordinates, scientificNameID) | 133 | information is not in the Zenodo files (paper, README): add it by hand / mapping override |
 | some rows with empty required values (coordinates, dates, unmatched taxa) | 20 | complete or drop the rows |
 | `parentEventID` without a parent event (EMODnetBiocheck) | 1 | source data issue |
-| Python check only: positions on land / depth plausibility (D06) | 2 | review values - the Venice lagoon zooplankton (18697857) falls on land in the coarse land mask |
+| Python check only: positions on land (D06) | 1 | review values |
 
-Average data score 82.0, average metadata score 91.2. The 11 *Warnings* archives are the first
+Average data score 82.3, average metadata score 91.2. The 12 *Warnings* archives are the first
 candidates for publication on the EMODnet Biology IPT: moon jellyfish observations, Seine nursery
 1995–2019, Pacific Arctic larval fish, Macaronesian islands ecosystems, pelagic/benthic food
 pathways, seabird juvenile survival, GeoEcoMar meiobenthos BRIDGE-BS 2022–2024 and DOORS 2023,
-GeoEcoMar zooplankton BRIDGE-BS 2022–2024, Fram Strait benthic fauna and North Atlantic
-deep-sea amphipods.
+GeoEcoMar zooplankton BRIDGE-BS 2022–2024, Fram Strait benthic fauna, North Atlantic
+deep-sea amphipods and Venice lagoon zooplankton (LTER-Italy).
 
 `institutionCode` / `institutionID` are filled by the converter from an `institutionCode` column
 of the data, from the EDMO code of a known institution among the creators (NIMRD "Grigore Antipa"

@@ -61,6 +61,7 @@ MAX_MB_PER_RECORD = 120     # total MB downloaded per record
 MAX_ROWS = 300_000          # rows read per table
 MAX_WORMS_NAMES = 200       # unique names sent to WoRMS per dataset (sampled above)
 MAX_XY_POINTS = 3000        # unique coordinates sent to xylookup per dataset
+LAND_MIN_ELEVATION = 5      # m above sea level for an inland point to count as on land
 
 # Documentation / helper files are read last (data files first).
 HELPER_FILES = (r'readme|licen|citation|md5|checksum|glossary|mapping|workflow|dictionary|codebook|'
@@ -101,7 +102,8 @@ CRITERIA = [
     ('D05', 'Coordinates in declared region', 'data', 'warning',
      'Points fall within the bounding box of the regions declared in the inventory.'),
     ('D06', 'Points at sea', 'data', 'error',
-     'Points are not on land (OBIS xylookup shoredistance; >25 % on land fails).'),
+     'Points are not on land (OBIS xylookup: inside the coastline and > 5 m above sea level; '
+     'inland points at sea level = lagoons, estuaries, deltas are accepted; >25 % on land fails).'),
     ('D07', 'Date validity', 'data', 'error',
      'Dates parse, are ISO 8601 (YYYY-MM-DD) and are not in the future.'),
     ('D08', 'Depth consistency', 'data', 'warning',
@@ -825,6 +827,19 @@ def clean_name(v):
     return words[0]
 
 
+def land_kind(r):
+    """Classify one xylookup result: 'sea', 'transitional' or 'land'. The xylookup coastline is
+    simplified and leaves lagoons, estuaries and deltas on land (e.g. the Venice lagoon lies
+    7-9 km "inland"), so an inland point counts as land only when the elevation grid puts it
+    more than LAND_MIN_ELEVATION m above sea level (bathymetry is negative on land)."""
+    if (r.get('shoredistance') or 0) >= 0:
+        return 'sea'
+    bathy = (r.get('grids') or {}).get('bathymetry')
+    if bathy is not None and bathy >= -LAND_MIN_ELEVATION:
+        return 'transitional'
+    return 'land'
+
+
 def xylookup(points):
     """points: list of (lon, lat) -> list of dict(shoredistance, bathymetry) or None."""
     out = []
@@ -1063,11 +1078,19 @@ def data_checks(tables, regions, worms, title='', files_checked=None):
             res_xy = xylookup(plist) if plist else []
             valid = [(p, r) for p, r in zip(plist, res_xy) if r]
             if valid:
-                land = sum(1 for _, r in valid if (r.get('shoredistance') or 0) < 0)
+                land, transitional = 0, 0
+                for _, r in valid:
+                    kind = land_kind(r)
+                    land += kind == 'land'
+                    transitional += kind == 'transitional'
                 p = pct(land, len(valid))
                 stats['onland_pct'] = p
                 res = 'pass' if p <= 5 else ('warn' if p <= 25 else 'fail')
-                checks.append(check('D06', res, f'{land} of {len(valid)} unique positions on land ({p}%)'))
+                msg = f'{land} of {len(valid)} unique positions on land ({p}%)'
+                if transitional:
+                    msg += (f'; {transitional} inside the coastline but at sea level '
+                            f'(lagoon / estuary / delta, accepted)')
+                checks.append(check('D06', res, msg))
                 if res != 'pass':
                     issues.append(f'{p}% of positions on land')
                 xy_info = {p: (r.get('grids') or {}).get('bathymetry') for p, r in valid}
