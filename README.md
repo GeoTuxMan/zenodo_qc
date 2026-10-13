@@ -227,26 +227,29 @@ Input: the 167 DwC-A produced by Task 3 (23 *Converted*, 144 *Partial*), Python 
 | QC status | Archives | What blocks publication |
 |---|---|---|
 | Pass | 0 | — |
-| Warnings | 8 | recommended terms only (depth, sampling instrument / effort), potential duplicates |
-| Fail | 159 | see below |
+| Warnings | 11 | recommended terms only (depth, sampling instrument / effort), potential duplicates |
+| Fail | 156 | see below |
 
-| Main error (EMODnetBiocheck) | Archives | Fix |
+| Main error | Archives | Fix |
 |---|---|---|
-| a required term absent from the whole dataset (eventDate, coordinates, scientificNameID) | 131 | information is not in the Zenodo files (paper, README): add it by hand / mapping override |
-| some rows with empty required values (coordinates, dates, unmatched taxa) | 23 | complete or drop the rows |
-| only `institutionCode` missing (no affiliation on Zenodo) | 3 | one value to add |
-| `parentEventID` without a parent event | 1 | source data issue |
-| Python check only (D06 depth / coordinates plausibility) | 1 | review values |
+| a required term absent from the whole dataset (eventDate, coordinates, scientificNameID) | 133 | information is not in the Zenodo files (paper, README): add it by hand / mapping override |
+| some rows with empty required values (coordinates, dates, unmatched taxa) | 20 | complete or drop the rows |
+| `parentEventID` without a parent event (EMODnetBiocheck) | 1 | source data issue |
+| Python check only: positions on land / depth plausibility (D06) | 2 | review values - the Venice lagoon zooplankton (18697857) falls on land in the coarse land mask |
 
-Average data score 82.0, average metadata score 91.2. The 8 *Warnings* archives (moon jellyfish
-observations, Seine nursery 1995–2019, Pacific Arctic larval fish, Macaronesian islands
-ecosystems, pelagic/benthic food pathways, seabird juvenile survival, GeoEcoMar meiobenthos
-BRIDGE-BS 2022–2024 and DOORS 2023) and the 3 that only lack `institutionCode` are the first
-candidates for publication on the EMODnet Biology IPT.
+Average data score 82.0, average metadata score 91.2. The 11 *Warnings* archives are the first
+candidates for publication on the EMODnet Biology IPT: moon jellyfish observations, Seine nursery
+1995–2019, Pacific Arctic larval fish, Macaronesian islands ecosystems, pelagic/benthic food
+pathways, seabird juvenile survival, GeoEcoMar meiobenthos BRIDGE-BS 2022–2024 and DOORS 2023,
+GeoEcoMar zooplankton BRIDGE-BS 2022–2024, and two re-publications of data already in
+GBIF/OBIS (Fram Strait benthic fauna via Bionomia, North Atlantic deep-sea amphipods from OBIS)
+that are **not** to be published again.
 
-`institutionCode` / `institutionID` are filled by the converter with the EDMO code when a creator
-belongs to a known institution (NIMRD "Grigore Antipa" = 697, GeoEcoMar = 850); this moved the
-two GeoEcoMar meiobenthos archives from *Fail* to *Warnings*.
+`institutionCode` / `institutionID` are filled by the converter from an `institutionCode` column
+of the data, from the EDMO code of a known institution among the creators (NIMRD "Grigore Antipa"
+= 697, GeoEcoMar = 850, CNR-ISMAR Venice = 227), or from `institutions.json` set by the data
+manager. Rows without a date take the date of the same sample/station; this moved the GeoEcoMar
+zooplankton archive (15119469) to *Warnings*.
 
 ## 6. Limitations
 * Column mapping is heuristic: unusual headers (other languages, codes) may be missed — such
