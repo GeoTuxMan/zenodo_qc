@@ -1306,7 +1306,7 @@ def decide(meta_checks, dchecks, data_checked, reason_not_checked, issues, layou
         bad = [CRIT[c['id']]['name'] for c in errors]
         rec = 'Fix before conversion: ' + ', '.join(bad)
     elif layout_dwca:
-        rec = 'Already Darwin Core - candidate for direct EMODnet/IPT ingestion'
+        rec = 'Already Darwin Core'
     elif status == 'Warnings':
         fixes = [i for i in issues if 'skipped' not in i]
         if res.get('D02') == 'warn':
@@ -1481,14 +1481,14 @@ def decide_dwca(dchecks, issues, biocheck):
         bad = [CRIT[c['id']]['name'] for c in errors]
         if bio_err:
             bad.append(f'{bio_err} EMODnetBiocheck error(s)')
-        return 'Fail', 'Fix before publication: ' + ', '.join(bad)
+        return 'Fail', 'To fix: ' + ', '.join(bad)
     bio_warn = (biocheck or {}).get('warnings') or 0
     if warns or bio_warn:
         fixes = [CRIT[c['id']]['name'] for c in warns]
         if bio_warn:
             fixes.append(f'{bio_warn} EMODnetBiocheck warning(s)')
         return 'Warnings', 'Publishable after review: ' + ', '.join(fixes[:4])
-    return 'Pass', 'Ready for EMODnet Biology / IPT publication'
+    return 'Pass', 'Meets all EMODnet Biology criteria'
 
 
 def load_biocheck(biocheck_dir, rec_id):
