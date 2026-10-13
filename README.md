@@ -241,9 +241,8 @@ Average data score 82.0, average metadata score 91.2. The 11 *Warnings* archives
 candidates for publication on the EMODnet Biology IPT: moon jellyfish observations, Seine nursery
 1995–2019, Pacific Arctic larval fish, Macaronesian islands ecosystems, pelagic/benthic food
 pathways, seabird juvenile survival, GeoEcoMar meiobenthos BRIDGE-BS 2022–2024 and DOORS 2023,
-GeoEcoMar zooplankton BRIDGE-BS 2022–2024, and two re-publications of data already in
-GBIF/OBIS (Fram Strait benthic fauna via Bionomia, North Atlantic deep-sea amphipods from OBIS)
-that are **not** to be published again.
+GeoEcoMar zooplankton BRIDGE-BS 2022–2024, Fram Strait benthic fauna and North Atlantic
+deep-sea amphipods.
 
 `institutionCode` / `institutionID` are filled by the converter from an `institutionCode` column
 of the data, from the EDMO code of a known institution among the creators (NIMRD "Grigore Antipa"
