@@ -1595,7 +1595,9 @@ def run_dwca_stage(args, log):
         with open(prev_path, encoding='utf-8') as f:
             prev = json.load(f).get('datasets', [])
         new = {r['record_id']: r for r in results}
-        results = [new.pop(p['record_id'], p) for p in prev] + list(new.values())
+        has_archive = {str(d.get('record_id')) for d in conv.get('datasets', []) if d.get('dwca_file')}
+        results = [new.pop(p['record_id'], p) for p in prev
+                   if str(p['record_id']) in has_archive] + list(new.values())   # drop archives no longer produced
     summary = write_outputs(results, args.out, stage='dwca',
                             extra_cols=('conversion_status', 'raw_qc_status', 'dwca_file'))
     for k, v in summary.items():
