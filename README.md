@@ -137,7 +137,7 @@ python zenodo_qc.py --inventory data.json --limit 50
 | `--cache` | `zenodo_cache` | download cache (can be shared with Task 3) |
 | `--out` | `output` | output folder |
 | `--limit N` | all | data-check at most N records (the others get metadata QC only) |
-| `--ids` | — | comma-separated Zenodo record ids |
+| `--ids` | — | comma-separated Zenodo record ids (with `--dwca`, the earlier stage-2 results of the other archives are kept) |
 | `--skip-data` | off | metadata QC only |
 | `--force` | off | recompute records already processed (per-record results are kept in `output/_records/` so an interrupted run resumes) |
 | `--workers` | 6 | records processed in parallel (API calls are rate-limited globally) |
@@ -227,21 +227,26 @@ Input: the 167 DwC-A produced by Task 3 (23 *Converted*, 144 *Partial*), Python 
 | QC status | Archives | What blocks publication |
 |---|---|---|
 | Pass | 0 | — |
-| Warnings | 6 | recommended terms only (depth, sampling instrument / effort), potential duplicates |
-| Fail | 161 | see below |
+| Warnings | 8 | recommended terms only (depth, sampling instrument / effort), potential duplicates |
+| Fail | 159 | see below |
 
 | Main error (EMODnetBiocheck) | Archives | Fix |
 |---|---|---|
 | a required term absent from the whole dataset (eventDate, coordinates, scientificNameID) | 131 | information is not in the Zenodo files (paper, README): add it by hand / mapping override |
 | some rows with empty required values (coordinates, dates, unmatched taxa) | 23 | complete or drop the rows |
-| only `institutionCode` missing (no affiliation on Zenodo) | 5 | one value to add |
+| only `institutionCode` missing (no affiliation on Zenodo) | 3 | one value to add |
 | `parentEventID` without a parent event | 1 | source data issue |
 | Python check only (D06 depth / coordinates plausibility) | 1 | review values |
 
-Average data score 82.0, average metadata score 91.2. The 6 *Warnings* archives (moon jellyfish
+Average data score 82.0, average metadata score 91.2. The 8 *Warnings* archives (moon jellyfish
 observations, Seine nursery 1995–2019, Pacific Arctic larval fish, Macaronesian islands
-ecosystems, pelagic/benthic food pathways, seabird juvenile survival) and the 5 that only
-lack `institutionCode` are the first candidates for publication on the EMODnet Biology IPT.
+ecosystems, pelagic/benthic food pathways, seabird juvenile survival, GeoEcoMar meiobenthos
+BRIDGE-BS 2022–2024 and DOORS 2023) and the 3 that only lack `institutionCode` are the first
+candidates for publication on the EMODnet Biology IPT.
+
+`institutionCode` / `institutionID` are filled by the converter with the EDMO code when a creator
+belongs to a known institution (NIMRD "Grigore Antipa" = 697, GeoEcoMar = 850); this moved the
+two GeoEcoMar meiobenthos archives from *Fail* to *Warnings*.
 
 ## 6. Limitations
 * Column mapping is heuristic: unusual headers (other languages, codes) may be missed — such

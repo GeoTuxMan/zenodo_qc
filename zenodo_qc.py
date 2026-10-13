@@ -1566,6 +1566,13 @@ def run_dwca_stage(args, log):
             t.pop('df', None)
 
     worms.save()
+    prev_path = os.path.join(args.out, OUTPUT_NAMES['dwca'][0])
+    if args.ids and os.path.exists(prev_path):
+        # a re-run of a subset updates the earlier results instead of replacing them
+        with open(prev_path, encoding='utf-8') as f:
+            prev = json.load(f).get('datasets', [])
+        new = {r['record_id']: r for r in results}
+        results = [new.pop(p['record_id'], p) for p in prev] + list(new.values())
     summary = write_outputs(results, args.out, stage='dwca',
                             extra_cols=('conversion_status', 'raw_qc_status', 'dwca_file'))
     for k, v in summary.items():
