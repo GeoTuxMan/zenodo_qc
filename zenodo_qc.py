@@ -1487,7 +1487,7 @@ def decide_dwca(dchecks, issues, biocheck):
         fixes = [CRIT[c['id']]['name'] for c in warns]
         if bio_warn:
             fixes.append(f'{bio_warn} EMODnetBiocheck warning(s)')
-        return 'Warnings', 'Publishable after review: ' + ', '.join(fixes[:4])
+        return 'Warnings', 'To review: ' + ', '.join(fixes[:4])
     return 'Pass', 'Meets all EMODnet Biology criteria'
 
 
